@@ -35,12 +35,18 @@ def bargraph(x,mn,mx,w,c='X'):
     mx= maximum plottable value, w= width of plot in chars,
     c= the character to plot with.'''
     if not w: return '' # No width!
+    x=clip(x,mn,mx)
+    #The previous line is optimising tese two lines.
+    """
     if x<mn: x= mn      # Clip to bounds.
     if x>mx: x= mx      # Clip to bounds.
+    """
+    
+    #*****************
     tx= mx-mn # Total real units possible to show on graph.
     if tx<=0: return 'backwards' # Stupid bounds.
     upw= tx/float(w) # X Units per output char width.
-    if upw<=0: return 'what?' # Don't let this happen.
+    if upw<=0: return 'What?' # Don't let this happen.
     negpu, pospu, negnonpu, posnonpu= 0,0,0,0
     if mn < 0: # Then there is a negative part to graph.
         if x < 0: # And the plot is on the negative side.
