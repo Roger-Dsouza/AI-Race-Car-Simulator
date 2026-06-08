@@ -633,15 +633,9 @@ def mgh(c):
     return
 
 
-if __name__ == "__main__":
-    C = Client(p=3001)
-    for step in range(C.maxSteps, 0, -1):
-        C.get_servers_input()
-        mgh(C)
-        C.respond_to_server()
-    C.shutdown()
-
-
+#############################################
+# MODULAR DRIVE LOGIC WITH USER PARAMETERS  #
+#############################################
 
 #############################################
 # MODULAR DRIVE LOGIC WITH USER PARAMETERS  #
@@ -650,12 +644,11 @@ if __name__ == "__main__":
 import math
 
 # ================= USER CONFIGURABLE PARAMETERS =================
-TARGET_SPEED = 100  # Target speed in km/h. Increasing this makes the car go faster but may reduce stability.
-STEER_GAIN = 30     # Steering sensitivity. Higher values make the car turn more aggressively.
-CENTERING_GAIN = 0.20  # How strongly the car corrects its position toward the center of the track.
-BRAKE_THRESHOLD = 0.9  # Angle threshold for braking. Lower values brake earlier.
-GEAR_SPEEDS = [0, 20, 40, 80, 100, 180]  # Speed thresholds for gear shifting.
-ENABLE_TRACTION_CONTROL = True  # Toggle traction control system.
+TARGET_SPEED = 240
+STEER_GAIN = 15
+CENTERING_GAIN = 0.10
+BRAKE_THRESHOLD = 0.3
+ENABLE_TRACTION_CONTROL = True
 
 # ================= HELPER FUNCTIONS =================
 def calculate_steering(S):
@@ -663,23 +656,51 @@ def calculate_steering(S):
     return max(-1, min(1, steer))
 
 def calculate_throttle(S, R):
-    if S['speedX'] < TARGET_SPEED - (R['steer'] * 2.5):
+    # Base acceleration logic
+    if S['speedX'] < TARGET_SPEED - (abs(R['steer']) * 2.5):
         accel = min(1.0, R['accel'] + 0.4)
     else:
         accel = max(0.0, R['accel'] - 0.2)
+        
+    # Extra kick at low speeds
     if S['speedX'] < 10:
         accel += 1 / (S['speedX'] + 0.1)
     return max(0.0, min(1.0, accel))
 
 def apply_brakes(S):
-    return 0.3 if abs(S['angle']) > BRAKE_THRESHOLD else 0.0
+    # S['track'][9] is the distance to the edge of the track straight ahead.
+    front_dist = S.get('track', [100]*19)[9]
+    speed = S.get('speedX', 0)
+
+    # 1. EMERGENCY BRAKING: Approaching a tight corner at high speed
+    if front_dist < 45 and speed > 70:
+        return 1.0  # Slam the brakes
+        
+    # 2. ANTICIPATION BRAKING: Bleed off speed before the corner
+    elif front_dist < 80 and speed > 130:
+        return 0.6  # Moderate brakes
+        
+    # 3. STABILITY BRAKING: The car is sideways/spinning
+    elif abs(S['angle']) > BRAKE_THRESHOLD:
+        return 0.3
+        
+    return 0.0
 
 def shift_gears(S):
-    gear = 1
-    for i, speed in enumerate(GEAR_SPEEDS):
-        if S['speedX'] > speed:
-            gear = i + 1
-    return min(gear, 6)
+    gear = S.get('gear', 1)
+    if gear < 1:
+        return 1
+        
+    rpm = S.get('rpm', 0)
+    
+    # Widened the RPM gap. Shifts up later, downshifts earlier.
+    # This gives the engine RPM room to drop without triggering a downshift.
+    if rpm > 8500 and gear < 6:
+        return gear + 1
+    if rpm < 2500 and gear > 1:
+        return gear - 1
+        
+    return gear
 
 def traction_control(S, accel):
     if ENABLE_TRACTION_CONTROL:
@@ -690,14 +711,22 @@ def traction_control(S, accel):
 # ================= MAIN DRIVE FUNCTION =================
 def drive_modular(c):
     S, R = c.S.d, c.R.d
+    
     R['steer'] = calculate_steering(S)
-    R['accel'] = calculate_throttle(S, R)
     R['brake'] = apply_brakes(S)
-    R['accel'] = traction_control(S, R['accel'])
+
+    # CRITICAL FIX: Cut the gas entirely if we are braking!
+    if R['brake'] > 0:
+        R['accel'] = 0.0
+    else:
+        base_accel = calculate_throttle(S, R)
+        R['accel'] = traction_control(S, base_accel)
+
     R['gear'] = shift_gears(S)
     return
 
 # ================= MAIN LOOP =================
+# (This is the ONLY main loop that should be in the file)
 if __name__ == "__main__":
     C = Client(p=3001)
     for step in range(C.maxSteps, 0, -1):
