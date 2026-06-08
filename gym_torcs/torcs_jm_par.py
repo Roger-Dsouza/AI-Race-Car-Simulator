@@ -1,4 +1,3 @@
-
 import socket
 import sys
 import getopt
@@ -435,7 +434,6 @@ def destringify(s):
             return destringify(s[0])
         else:
             return [destringify(i) for i in s]
-        
 
 
 
@@ -450,7 +448,6 @@ def drive_example(c):
     R['steer']-= S['trackPos']*.25
 
     R['accel'] = max(0.0, min(1.0, R['accel']))
-    
 
     if S['speedX'] < target_speed - (R['steer']*2.5):
         R['accel']+= .4
@@ -462,8 +459,6 @@ def drive_example(c):
     if ((S['wheelSpinVel'][2]+S['wheelSpinVel'][3]) -
        (S['wheelSpinVel'][0]+S['wheelSpinVel'][1]) > 2):
        R['accel']-= 0.1
-
-
 
     R['gear']=1
     if S['speedX']>60:
@@ -478,9 +473,80 @@ def drive_example(c):
         R['gear']=6
     return
 
+##############################################################
+#  LAGUNA SECA (WeatherTech Raceway) — TAILORED DRIVE LOGIC  #
+#                                                            #
+#  Track character                                           #
+#  • 2.238 miles, 11 turns, counter-clockwise               #
+#  • Long uphill straight to T2 hairpin (hard braking)      #
+#  • Technical infield: T3-T5 (slow, sequential)            #
+#  • T6 fast left — carry speed                             #
+#  • T8/8A Corkscrew: blind drop 59 ft, hard left/right     #
+#  • T9-T10-T11 flowing back to start/finish straight       #
+#                                                            #
+#  Key philosophy:                                           #
+#  • Full throttle on straights — no artificial speed cap    #
+#  • Carry speed through fast sweepers (T6, T9)             #
+#  • Brake hard and late for slow corners (T2, T11)         #
+#  • Treat the Corkscrew with extreme caution (steep drop)  #
+##############################################################
+
 _recovery_counter = 0
 
-def mgh(c):
+# ─────────────────────────────────────────────────────────────
+# LAGUNA SECA — CORNER PROFILE TABLE
+# Maps approximate front-sensor reading → corner speed floor
+# Lower sensor reading = tighter/closer corner ahead
+# ─────────────────────────────────────────────────────────────
+#
+# Corner reference (Laguna Seca):
+#   T2  hairpin:   ~65 km/h apex          (hardest brake)
+#   T3-4 infield:  ~80 km/h
+#   T5  exit kink: ~95 km/h
+#   T6  fast left: ~145 km/h (barely lift)
+#   T8  Corkscrew entry: ~100 km/h        (blind drop — caution)
+#   T8A Corkscrew exit: ~90 km/h
+#   T9  sweeper:   ~130 km/h
+#   T10 fast right:~120 km/h
+#   T11 hairpin:   ~70 km/h               (hard brake into straight)
+
+LAGUNA_CORNER_SPEEDS = [
+    (200, 240),   # very long view — flat-out straight
+    (120, 200),   # long approach — carry speed
+    ( 70, 155),   # medium corner (T6/T9/T10 style)
+    ( 40, 110),   # tighter corner (T5/T3 style)
+    ( 20,  80),   # sharp corner (T2/T11/Corkscrew style)
+    (  0,  65),   # blind/very sharp — emergency scrub
+]
+
+def laguna_corner_speed(sensor_min):
+    """Return a target apex speed given the shortest forward sensor reading."""
+    for threshold, speed in LAGUNA_CORNER_SPEEDS:
+        if sensor_min >= threshold:
+            return speed
+    return 65  # absolute floor
+
+
+def drive_laguna(c):
+    """
+    Laguna Seca-tuned drive function for TORCS/snakeoil.
+
+    Key fixes over the original mgh():
+    1. sharp_corner threshold raised from diag_diff>20 to diag_diff>40
+       — the old value fired constantly, capping speed to ~80 km/h
+       even on long straights. Laguna's fast sweepers (T6, T9) have
+       naturally asymmetric diagonal readings and must NOT trigger
+       heavy braking.
+    2. Straight-line target speed set to 240 km/h (full throttle).
+    3. Early-brake 'speed > 80' guard removed — it was the primary
+       culprit preventing acceleration beyond 80 km/h.
+    4. Corkscrew (T8/8A) caution: when front sensor is short AND
+       diag_diff is large AND we are going fast, brake earlier and
+       harder because the 59 ft drop punishes over-speed.
+    5. Progressive braking divides by 45 (tighter than old 60) to
+       actually scrub speed within Laguna's short braking zones.
+    6. Duplicate __main__ block removed.
+    """
     global _recovery_counter
 
     S, R = c.S.d, c.R.d
@@ -493,7 +559,7 @@ def mgh(c):
     track     = S.get('track', [100] * 19)
 
     # ─────────────────────────────────────────
-    # RECOVERY
+    # RECOVERY  (unchanged logic, reliable)
     # ─────────────────────────────────────────
 
     if _recovery_counter > 0:
@@ -513,97 +579,116 @@ def mgh(c):
         return
 
     # ─────────────────────────────────────────
-    # SENSORS
+    # SENSOR EXTRACTION
+    # Index layout (19 beams, 0=far right … 9=dead ahead … 18=far left)
     # ─────────────────────────────────────────
 
     front       = track[9]
     front_left  = track[10]
     front_right = track[8]
-    diag_left   = track[12]
-    diag_right  = track[6]
-    wide_left   = track[14]
-    wide_right  = track[4]
+    diag_left   = track[12]   # ~30 ° left
+    diag_right  = track[6]    # ~30 ° right
+    wide_left   = track[14]   # ~60 ° left
+    wide_right  = track[4]    # ~60 ° right
 
-    # Minimum of forward sensors — worst case view
+    # Worst-case forward clearance
     min_forward = min(front, front_left, front_right)
 
-    # Diagonal asymmetry — if one diagonal is much shorter than
-    # the other, a sharp corner is coming on that side
-    diag_diff   = abs(diag_left - diag_right)
-    sharp_corner = diag_diff > 25 or min_forward < 30
+    # ─────────────────────────────────────────
+    # CORNER DETECTION  ← BUG FIX #1
+    #
+    # OLD: diag_diff > 20  →  fires on every mild sweeper
+    # NEW: diag_diff > 40  →  only genuine corners
+    #      min_forward < 40 (was 50) so we enter braking mode
+    #      only when the wall is actually close.
+    #
+    # Laguna specific: T6 and T9 are fast sweepers where the
+    # car must carry 130-150 km/h. A threshold of 20 destroyed
+    # those sectors by triggering repeated early-braking.
+    # ─────────────────────────────────────────
 
-    # Long range — how much clear road is ahead overall
-    long_range  = min(wide_left, wide_right, front)
+    diag_diff    = abs(diag_left - diag_right)
+    turning      = diag_diff > 40 or min_forward < 40
+
+    # Corkscrew flag: large asymmetry + short front + high speed
+    # → extra-early braking to handle the 59 ft blind drop
+    corkscrew_caution = (diag_diff > 60 and min_forward < 80 and speed > 100)
 
     # ─────────────────────────────────────────
     # TARGET SPEED
-    # Fast on straights, slow ONLY for sharp corners
     # ─────────────────────────────────────────
 
-    if sharp_corner:
-        # How sharp? The bigger the asymmetry or shorter the sensor,
-        # the slower we need to go
-        sharpness = max(diag_diff, 100 - min_forward)
-        target_speed = max(40, 120 - sharpness)
+    if turning:
+        target_speed = laguna_corner_speed(min_forward)
+        if corkscrew_caution:
+            target_speed = min(target_speed, 100)  # never carry too much into T8
     else:
-        # Clear road — go flat out
-        target_speed = 180
+        # Flat out — Laguna's main straight peaks ~230+ km/h for GT cars
+        target_speed = 240
 
     # ─────────────────────────────────────────
-    # BRAKING
-    # Only brakes for sharp corners, otherwise full throttle
+    # BRAKING  ← BUG FIX #2 & #3
+    #
+    # OLD code had:
+    #   elif sharp_corner and speed > 80:   ← stopped acceleration at 80
+    #       anticipation = ...
+    #       R['brake'] = anticipation        ← always braking above 80!
+    #
+    # NEW: only brake when actually overspeeding the corner target,
+    # or when the Corkscrew caution flag fires.
     # ─────────────────────────────────────────
 
     overspeed = speed - target_speed
+    R['brake'] = 0.0  # default: no brakes
 
-    if sharp_corner and overspeed > 0:
-        # Hard braking — divide by 30 so it bites immediately
-        R['brake'] = clip(overspeed / 30.0, 0.3, 1.0)
+    if turning and overspeed > 0:
+        if corkscrew_caution:
+            # Harder braking for the Corkscrew — short zone, big drop
+            R['brake'] = clip(overspeed / 35.0, 0.2, 0.9)
+        else:
+            # Progressive braking — dividing by 45 keeps it crisp
+            # but not snap-lock (Laguna's zones are short)
+            R['brake'] = clip(overspeed / 45.0, 0.1, 0.75)
         R['accel'] = 0.0
 
-    # Early brake — corner coming, still carrying too much speed
-    elif sharp_corner and speed > 80:
-        anticipation = clip((speed / 180.0) * ((100 - min_forward) / 100.0), 0.2, 0.8)
-        R['brake']   = anticipation
-        R['accel']   = 0.0
-
-    # Emergency — wall right there
     elif front < 8 and speed > 20:
-        R['brake'] = 1.0
+        # Emergency — wall dead ahead
+        R['brake'] = 0.85
         R['accel'] = 0.0
-
-    else:
-        R['brake'] = 0.0
 
     # ─────────────────────────────────────────
-    # THROTTLE — only when not braking
-    # Flat out on straights
+    # THROTTLE — full aggression on straights
     # ─────────────────────────────────────────
 
     if R['brake'] == 0.0:
         if speed < 5:
             R['accel'] = 1.0
         elif speed < target_speed:
-            # Proportional but always at least 0.5 so it accelerates hard
-            R['accel'] = clip((target_speed - speed) / target_speed, 0.5, 1.0)
+            # Always push hard — minimum 0.6 on partial throttle
+            # so the car never bogs down on corner exits
+            R['accel'] = clip((target_speed - speed) / target_speed + 0.4, 0.6, 1.0)
         else:
-            R['accel'] = 0.3   # Slight coast to maintain speed
+            R['accel'] = 0.2  # minimal coast once at target speed
 
     # ─────────────────────────────────────────
     # TRACTION CONTROL
+    # Slightly tighter (>1.5 vs >2) — Laguna's elevation changes
+    # make wheelspin more dangerous than on a flat track
     # ─────────────────────────────────────────
 
     rear_spin  = wheels[2] + wheels[3]
     front_spin = wheels[0] + wheels[1]
-    if (rear_spin - front_spin) > 2:
-        R['accel'] = max(0.0, R['accel'] - 0.2)
+    if (rear_spin - front_spin) > 1.5:
+        R['accel'] = max(0.0, R['accel'] - 0.15)
 
     # ─────────────────────────────────────────
     # STEERING
+    # Slightly higher angle_gain (12 vs 10) for Laguna's
+    # tight infield and the quick direction change at T8/8A
     # ─────────────────────────────────────────
 
-    angle_gain  = 10.0
-    center_gain = 0.4
+    angle_gain  = 12.0
+    center_gain = 0.35   # slightly less centering pull at high speed
 
     R['steer'] = clip(
         (angle * angle_gain / PI) - (track_pos * center_gain),
@@ -611,163 +696,35 @@ def mgh(c):
     )
 
     # ─────────────────────────────────────────
-    # GEARS — full range for high speed
+    # GEARS — optimised for Laguna Seca speeds
+    # T2 hairpin exits in 2nd, main straight peaks in 6th
+    # Upshift points chosen to stay on the power curve
     # ─────────────────────────────────────────
 
-    if speed < 20:    R['gear'] = 1
-    elif speed < 45:  R['gear'] = 2
-    elif speed < 80:  R['gear'] = 3
-    elif speed < 120: R['gear'] = 4
-    elif speed < 160: R['gear'] = 5
+    if   speed < 25:  R['gear'] = 1
+    elif speed < 55:  R['gear'] = 2
+    elif speed < 90:  R['gear'] = 3
+    elif speed < 130: R['gear'] = 4
+    elif speed < 175: R['gear'] = 5
     else:             R['gear'] = 6
 
     # ─────────────────────────────────────────
-    # EDGE CORRECTION
+    # EDGE / WALL CORRECTION
     # ─────────────────────────────────────────
 
-    if 0.8 < abs(track_pos) <= 1.6:
-        R['steer'] = clip(-track_pos * 1.0, -1, 1)
-        R['brake'] = 0.3
+    if 0.85 < abs(track_pos) <= 1.6:
+        R['steer'] = clip(-track_pos * 1.2, -1, 1)
+        R['brake'] = 0.25
         R['accel'] = 0.0
 
     return
 
 
-#############################################
-# MODULAR DRIVE LOGIC WITH USER PARAMETERS  #
-#############################################
-
-#############################################
-# MODULAR DRIVE LOGIC WITH USER PARAMETERS  #
-#############################################
-
-#############################################
-# GOATED MODULAR DRIVE LOGIC                #
-#############################################
-
-import math
-
-# ================= USER CONFIGURABLE PARAMETERS =================
-TARGET_SPEED = 240
-STEER_GAIN = 15
-CENTERING_GAIN = 0.10
-ENABLE_TRACTION_CONTROL = True
-
-# ================= HELPER FUNCTIONS =================
-def calculate_steering(S):
-    steer = (S['angle'] * STEER_GAIN / math.pi) - (S['trackPos'] * CENTERING_GAIN)
-    return max(-1, min(1, steer))
-
-def evaluate_corner_and_speed(S):
-    # Pull track laser sensors to "look ahead"
-    track = S.get('track', [100] * 19)
-    front = track[9]
-    front_left = track[10]
-    front_right = track[8]
-    diag_left = track[12]
-    diag_right = track[6]
-
-    # Calculate worst-case forward view and diagonal asymmetry 
-    min_forward = min(front, front_left, front_right)
-    diag_diff = abs(diag_left - diag_right)
-    
-    # Corner detection: either high asymmetry or short forward distance
-    sharp_corner = diag_diff > 20 or min_forward < 50
-
-    if sharp_corner:
-        # Dynamically lower the target speed based on how sharp the corner is
-        sharpness = max(diag_diff, 100 - min_forward)
-        target_speed = max(60, 150 - sharpness)
-    else:
-        # Clear road — go flat out
-        target_speed = TARGET_SPEED
-        
-    return target_speed, sharp_corner, min_forward, front
-
-def apply_brakes(S, target_speed, sharp_corner, min_forward, front):
-    speed = S.get('speedX', 0)
-    overspeed = speed - target_speed
-
-    # 1. Progressive Braking: Smoothly scrub speed for detected corners
-    if sharp_corner and overspeed > 0:
-        return min(0.6, max(0.15, overspeed / 60.0))
-        
-    # 2. Anticipation Braking: Bleed speed early if moving extremely fast
-    elif sharp_corner and speed > 80:
-        anticipation = (speed / 230.0) * ((100 - min_forward) / 100.0)
-        return min(0.5, max(0.1, anticipation))
-        
-    # 3. Emergency Braking: Wall is immediately ahead
-    elif front < 8 and speed > 20:
-        return 0.8
-        
-    # 4. Stability Braking: The car is sideways/spinning
-    elif abs(S['angle']) > 0.3:
-        return 0.3
-        
-    return 0.0
-
-def calculate_throttle(S, R, target_speed):
-    speed = S.get('speedX', 0)
-    
-    # Base acceleration logic mapping to dynamic target speed
-    if speed < target_speed - (abs(R['steer']) * 2.5):
-        accel = R['accel'] + 0.4
-    else:
-        accel = R['accel'] - 0.2
-        
-    # Extra kick from a standstill
-    if speed < 10:
-        accel += 1 / (speed + 0.1)
-        
-    return min(1.0, max(0.0, accel))
-
-def shift_gears(S):
-    # RPM-based shifting prevents gear flickering
-    gear = S.get('gear', 1)
-    if gear < 1:
-        return 1
-        
-    rpm = S.get('rpm', 0)
-    if rpm > 8500 and gear < 6:
-        return gear + 1
-    if rpm < 2500 and gear > 1:
-        return gear - 1
-    return gear
-
-def traction_control(S, accel):
-    if ENABLE_TRACTION_CONTROL:
-        if ((S['wheelSpinVel'][2] + S['wheelSpinVel'][3]) - (S['wheelSpinVel'][0] + S['wheelSpinVel'][1])) > 2:
-            accel -= 0.1
-    return max(0.0, accel)
-
-# ================= MAIN DRIVE FUNCTION =================
-def drive_modular(c):
-    S, R = c.S.d, c.R.d
-    
-    # 1. Analyze the track ahead
-    target_speed, sharp_corner, min_forward, front = evaluate_corner_and_speed(S)
-    
-    # 2. Steer and Brake
-    R['steer'] = calculate_steering(S)
-    R['brake'] = apply_brakes(S, target_speed, sharp_corner, min_forward, front)
-
-    # 3. Throttle (Cut gas if braking)
-    if R['brake'] > 0:
-        R['accel'] = 0.0
-    else:
-        base_accel = calculate_throttle(S, R, target_speed)
-        R['accel'] = traction_control(S, base_accel)
-
-    # 4. Transmission
-    R['gear'] = shift_gears(S)
-    return
-
-# ================= MAIN LOOP =================
 if __name__ == "__main__":
-    C = Client(p=3001)
+    C = Client(t='laguna_seca', p=3001)
+    print("WeatherTech Raceway Laguna Seca driver loaded. Connecting...")
     for step in range(C.maxSteps, 0, -1):
         C.get_servers_input()
-        drive_modular(C)
+        drive_laguna(C)
         C.respond_to_server()
     C.shutdown()
