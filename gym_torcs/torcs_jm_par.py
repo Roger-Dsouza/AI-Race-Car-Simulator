@@ -458,6 +458,27 @@ def drive_example(c):
         R['accel']+= .4
     else:
         R['accel']-= .2
+    if        
+
+
+
+
+def drive_example(c):
+    '''This is only an example. It will get around the track but the
+    correct thing to do is write your own `drive()` function.'''
+    S,R= c.S.d,c.R.d
+    target_speed=160
+
+    R['steer']= S['angle']*25 / PI
+    R['steer']-= S['trackPos']*.25
+
+    R['accel'] = max(0.0, min(1.0, R['accel']))
+    
+
+    if S['speedX'] < target_speed - (R['steer']*2.5):
+        R['accel']+= .4
+    else:
+        R['accel']-= .2
     if S['speedX']<10:
        R['accel']+= 1/(S['speedX']+.1)
 
@@ -480,26 +501,167 @@ def drive_example(c):
         R['gear']=6
     return
 
+_recovery_counter = 0
+
+def mgh(c):
+    global _recovery_counter
+
+    S, R = c.S.d, c.R.d
+
+    speed     = S['speedX']
+    angle     = S['angle']
+    track_pos = S['trackPos']
+    stuck     = S.get('stucktimer', 0)
+    wheels    = S.get('wheelSpinVel', [0, 0, 0, 0])
+    track     = S.get('track', [100] * 19)
+
+    # ─────────────────────────────────────────
+    # RECOVERY
+    # ─────────────────────────────────────────
+
+    if _recovery_counter > 0:
+        _recovery_counter -= 1
+        R['gear']  = -1
+        R['accel'] = 0.6
+        R['brake'] = 0.0
+        R['steer'] = clip(track_pos * 0.5, -1, 1)
+        return
+
+    if stuck > 50 or abs(track_pos) > 1.6:
+        _recovery_counter = 80
+        R['gear']  = -1
+        R['accel'] = 0.6
+        R['brake'] = 0.0
+        R['steer'] = clip(track_pos * 0.5, -1, 1)
+        return
+
+    # ─────────────────────────────────────────
+    # SENSORS
+    # ─────────────────────────────────────────
+
+    front       = track[9]
+    front_left  = track[10]
+    front_right = track[8]
+    diag_left   = track[12]
+    diag_right  = track[6]
+    wide_left   = track[14]
+    wide_right  = track[4]
+
+    # Minimum of forward sensors — worst case view
+    min_forward = min(front, front_left, front_right)
+
+    # Diagonal asymmetry — if one diagonal is much shorter than
+    # the other, a sharp corner is coming on that side
+    diag_diff   = abs(diag_left - diag_right)
+    sharp_corner = diag_diff > 25 or min_forward < 30
+
+    # Long range — how much clear road is ahead overall
+    long_range  = min(wide_left, wide_right, front)
+
+    # ─────────────────────────────────────────
+    # TARGET SPEED
+    # Fast on straights, slow ONLY for sharp corners
+    # ─────────────────────────────────────────
+
+    if sharp_corner:
+        # How sharp? The bigger the asymmetry or shorter the sensor,
+        # the slower we need to go
+        sharpness = max(diag_diff, 100 - min_forward)
+        target_speed = max(40, 120 - sharpness)
+    else:
+        # Clear road — go flat out
+        target_speed = 180
+
+    # ─────────────────────────────────────────
+    # BRAKING
+    # Only brakes for sharp corners, otherwise full throttle
+    # ─────────────────────────────────────────
+
+    overspeed = speed - target_speed
+
+    if sharp_corner and overspeed > 0:
+        # Hard braking — divide by 30 so it bites immediately
+        R['brake'] = clip(overspeed / 30.0, 0.3, 1.0)
+        R['accel'] = 0.0
+
+    # Early brake — corner coming, still carrying too much speed
+    elif sharp_corner and speed > 80:
+        anticipation = clip((speed / 180.0) * ((100 - min_forward) / 100.0), 0.2, 0.8)
+        R['brake']   = anticipation
+        R['accel']   = 0.0
+
+    # Emergency — wall right there
+    elif front < 8 and speed > 20:
+        R['brake'] = 1.0
+        R['accel'] = 0.0
+
+    else:
+        R['brake'] = 0.0
+
+    # ─────────────────────────────────────────
+    # THROTTLE — only when not braking
+    # Flat out on straights
+    # ─────────────────────────────────────────
+
+    if R['brake'] == 0.0:
+        if speed < 5:
+            R['accel'] = 1.0
+        elif speed < target_speed:
+            # Proportional but always at least 0.5 so it accelerates hard
+            R['accel'] = clip((target_speed - speed) / target_speed, 0.5, 1.0)
+        else:
+            R['accel'] = 0.3   # Slight coast to maintain speed
+
+    # ─────────────────────────────────────────
+    # TRACTION CONTROL
+    # ─────────────────────────────────────────
+
+    rear_spin  = wheels[2] + wheels[3]
+    front_spin = wheels[0] + wheels[1]
+    if (rear_spin - front_spin) > 2:
+        R['accel'] = max(0.0, R['accel'] - 0.2)
+
+    # ─────────────────────────────────────────
+    # STEERING
+    # ─────────────────────────────────────────
+
+    angle_gain  = 10.0
+    center_gain = 0.4
+
+    R['steer'] = clip(
+        (angle * angle_gain / PI) - (track_pos * center_gain),
+        -1, 1
+    )
+
+    # ─────────────────────────────────────────
+    # GEARS — full range for high speed
+    # ─────────────────────────────────────────
+
+    if speed < 20:    R['gear'] = 1
+    elif speed < 45:  R['gear'] = 2
+    elif speed < 80:  R['gear'] = 3
+    elif speed < 120: R['gear'] = 4
+    elif speed < 160: R['gear'] = 5
+    else:             R['gear'] = 6
+
+    # ─────────────────────────────────────────
+    # EDGE CORRECTION
+    # ─────────────────────────────────────────
+
+    if 0.8 < abs(track_pos) <= 1.6:
+        R['steer'] = clip(-track_pos * 1.0, -1, 1)
+        R['brake'] = 0.3
+        R['accel'] = 0.0
+
+    return
+
+
 if __name__ == "__main__":
-    C= Client(p=3001)
-    for step in range(C.maxSteps,0,-1):
+    C = Client(p=3001)
+    for step in range(C.maxSteps, 0, -1):
         C.get_servers_input()
-        drive_example(C)
-        C.respond_to_server()
-    C.shutdown()
-
-
-
-#############################################
-# MODULAR DRIVE LOGIC WITH USER PARAMETERS  #
-#############################################
-
-import math
-
-# ================= USER CONFIGURABLE PARAMETERS =================
-TARGET_SPEED = 100  # Target speed in km/h. Increasing this makes the car go faster but may reduce stability.
-STEER_GAIN = 30     # Steering sensitivity. Higher values make the car turn more aggressively.
-CENTERING_GAIN = 0.20  # How strongly the car corrects its position toward the center of the track.
+        mgh(C)
+N = 0.20  # How strongly the car corrects its position toward the center of the track.
 BRAKE_THRESHOLD = 0.9  # Angle threshold for braking. Lower values brake earlier.
 GEAR_SPEEDS = [0, 20, 40, 80, 100, 180]  # Speed thresholds for gear shifting.
 ENABLE_TRACTION_CONTROL = True  # Toggle traction control system.

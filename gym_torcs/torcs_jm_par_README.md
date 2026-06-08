@@ -53,8 +53,13 @@ Client Class:
         - vision:
         - host: The site where the client is hosted at.
         - port: The port where the client will be posted at.
+        - sid: Specific id- in this case, 'src'.
+        - maxEpisodes: Maximum number of learning episodes to perform.
+        - trackname: Set during the race initiation.
         - stage: All three stages included.
         - debug: Debug mode enabled or not.
+        - maxSteps: The upper bound of steps that the client will take.
+        - parse_the_command_line(): 
          
 
 
