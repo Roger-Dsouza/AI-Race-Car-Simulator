@@ -112,8 +112,8 @@ Client() Class:
 
 ServerState() Class:
   Attributes:
-    serverstr: A string variable.
-    d: A dictionary variable.
+    serverstr: A string variable. Which contains information for the state of the server which will be updated to its dictionary variable.
+    d: A dictionary variable. Which is sued to store the conetents of the server string for future reference.
 
   Methods:
     1. parse_server_str():
@@ -141,7 +141,32 @@ ServerState() Class:
                   Finally, the strout string focuses on the gear specifically, inserting the gear as highlighted out of the others.
               2. 'damage' returns the damage output to six signifcant giures and a bargraph highlighting the scale of the damage with the scale in '~'.
               3. 'Fuel': Returns the same specification. The only difference is that the scale if of 'f'.
-              4. 'speedX': Shows the speed in the x-direction with the bargraph.
+              4. 'speedX': Shows the speed in the x-direction with the bargraph. With 'R' if it the speed is less than zero.
+              5. 'SpeedY': Similiar setup to speedX. Only that the bargraph tracker is 'Y'.
+              6. 'speedZ': Similiar setup to speedX. Only that the bargraph tracker is 'Z'.
+              7. trackPos: Renders the position of the car by '<' or '>' arrows.
+              8. stucktimer: If the sensor variable has a value, it is displayed in a bar graph, otherwise states that it is not stuck.
+              9. rpm: Selects the gear option and then displays the rpm in a bar-graph.
+              10. angle: Fetches the angle in radians and then displays the angle in degrees, radians, and a visual display of the angle.
+              11. skid: Fetches the rotation of the front wheel, if there is a value, it is then used to calculate and display the magnitude of the skid.
+              12. slip: Fetches the rotation of the front wheel, then if there is a tangible value present, it factors in the contribution of the other wheels to calculate the slip of the vehicle and display its magnitude.
+
+              If the sensor is not any of these categories, it is just encoded in a string format. 
+
+              Finally, all of the bar-graphs throughout the function are added to the strout variable and are then returned out of the function as a pair of sensor and the corresponding output.
+
+DriverAction() class:
+  Attributes:
+    - actionstr: Represents the action currently being performed by the driver.
+    - d: A dictionary containing the current state of the driver and with the goal of the methods to modify them.
+
+  Methods: 
+  1. clip_to_limits():
+    Clips each value in the dictionary to the limits to prevent anomalous data being sent to the server.
+
+  2. __repr__():
+    Provides a representation of the DriverAction after first clipping to the limits.
+
 
 
 
