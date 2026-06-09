@@ -48,7 +48,7 @@ Functions:
     => [*****_]
 
 
-Client Class:
+Client() Class:
     Attributes:
         - vision:
         - host: The site where the client is hosted at.
@@ -59,7 +59,102 @@ Client Class:
         - stage: All three stages included.
         - debug: Debug mode enabled or not.
         - maxSteps: The upper bound of steps that the client will take.
-        - parse_the_command_line(): 
+        - parse_the_command_line(): An inherently run command which first gets a tuple for the options and their corresponding arguments. After error checking, it checks the corresponding flags and runs the usage script for each option.
+        - Chain of Conditionals:
+        [H,p,i,e,t,s,d]: Assigns the corresponding attribute to the value present.
+        - Sets its S attribute to the ServerState() function.
+        - Sets its R attribute to the DriverAction() function.
+        - Implements the setup_connection() function.
+
+
+    Methods:
+    - setup_connection(): 
+      - Sets up the socket with the AF_INET. This creates the IPv4 addressing convention.
+      - Also creates a Datagram socket which uses the UDP protocol. Which allows messages to be sent via system similiar to a mailing system with no need for simultaneous connection.
+      - After returning an error message if unable to create a socket. It sets out a time out option of 1 second.
+
+      Sets the number of times it fails to connect to be 5.
+
+      Then initiates a continuous loop such that during each iteration:
+        1. Creates a string that functions as a unique identifier tag.
+        2. Tries to encode the string and sends it to the host on the port under the object's socket. Exits if an error message is detected.
+        3. Creates a string variable that accepts incoming socket data.
+        4. Tries to recieve messages from the socket and the address of the incoming message.
+        5. Decodes the socket data under the utf-8 convention. If an error message comes up instead. It tries to re-establish a connection for five more times. If it fails, there is a message demanding a relaunch of torcs. Aborting torcs and then reports whether vision attribute was present in the first place. Then restarts the process after 1 second, and resetting the number of tries.
+        6. If the socket data contains the '***identified***' string, then confirms connection is established.
+
+    - parse_the_command_line():
+      - Gets the tuple containing opts which is a tuple containing the flag and its singly associated value. The args is the value passed into the function directly.
+      - After returning an error in case it cannot correctly sort the incoming input. It parses through the options stored in opts. 
+        1. After checking the first part of the options tuple, it will output the appropriate usage output.
+        2. If a wrong parameter is passed. It will point out the appropriate area where the parameter was wrongly passed. If the length of the arguments is greater than 0, it will return that the input is flawed. As no input is meant to be passed into the client function.
+
+    - get_servers_input():
+      - In a continuous loop:
+        - Gets the socket data and address and decodes the data in utf-8 format. If error, returns '. '.
+        - If the string "***identified***" is in socket data prints that it is connected.
+        - If "***shutdown***" is identified, prints out that the server has stopped the race at the port and highlights which position you were in.
+        - "***restart***" restarts the race.
+        - It then performs a check that there is data in the sockdata variable.
+        - Otherwise it just parses the sockdata string and writes out the data out clearly if debug mode is enabled.
+
+    respond_to_server():
+      - First checks that a socket is created.
+      - Then converts the output of the DriverState function into a String encoding.
+      - Finally sends the message as raw bytes to the location of the host which is in a specific port.
+
+      - If the process throws out an error message, function states that it couldn't send out the message. 
+      - The process prints out a human readable version of the text if debug mode is enabled.
+
+  shutdown():
+      - Firstly after checking that socket creation was successful, it then closes the socket and then signals it has done so.
+
+
+ServerState() Class:
+  Attributes:
+    serverstr: A string variable.
+    d: A dictionary variable.
+
+  Methods:
+    1. parse_server_str():
+      First, it removes the unneccesary whitespaces at beginning and at the end, then returns everything except the last character.
+      Then, it further removes any more whitespaces and then removes the brackets '()'. then splits the string on the basis of ')('.
+      Finally, it iterates through each of the items in the list and splits the string on the basis of whitespaces, and each item in the list is then removed from the string encoding present.
+
+      2. __repr__():
+        returns a description of itself in a human-readable format. (Don't know what's up with the out string description).
+
+      3. fancyout():
+        Specifies the output for writing out the state of the server which will be useful in debugging. States the sensor parameters.
+        Then for each:
+          First checks if the type is a list: There are only two particular sensors which are of a list type- 'track','opponents'.
+            1. If the sensor type is the track sensors: then it will strip the digits of the particular sensor track.
+            2. If the sensor type is the opponents sensor: It calculates the distance between the car and the nearest opponent. It simplifies it down into a more tangible value to gauge distance. Adding arrows to signify the direction the opponent is at.
+            3. If it is another type of sensor, it just lists the values joined by a comma.
+
+            For the non list sensors:
+              1. If the sensor type is gear sensor: (Now gear is part of RPM):
+                  It lists out the total gears present.
+                  Then finds the position and converts it into the appropriate gear location.
+                  Then it collects the label at that position, taking care that the -1 and 0 label correspond to Reverse and Neutral position.
+
+                  Finally, the strout string focuses on the gear specifically, inserting the gear as highlighted out of the others.
+              2. 'damage' returns the damage output to six signifcant giures and a bargraph highlighting the scale of the damage with the scale in '~'.
+              3. 'Fuel': Returns the same specification. The only difference is that the scale if of 'f'.
+              4. 'speedX': Shows the speed in the x-direction with the bargraph.
+
+
+
+
+
+
+
+
+
+
+    
+      
+
          
 
 
