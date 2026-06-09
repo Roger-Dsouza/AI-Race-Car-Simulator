@@ -404,7 +404,6 @@ class DriverAction():
             else:
                 out+= ' '.join([str(x) for x in v])
             out+= ')'
-        return out
         return out+'\n'
 
     def fancyout(self):
@@ -441,24 +440,7 @@ def destringify(s):
         else:
             return [destringify(i) for i in s]
 
-def drive_example(c):
-    '''This is only an example. It will get around the track but the
-    correct thing to do is write your own `drive()` function.'''
-    S,R= c.S.d,c.R.d
-    target_speed=160
-
-    R['steer']= S['angle']*25 / PI
-    R['steer']-= S['trackPos']*.25
-
-    R['accel'] = max(0.0, min(1.0, R['accel']))
-    
-
-    if S['speedX'] < target_speed - (R['steer']*2.5):
-        R['accel']+= .4
-    else:
-        R['accel']-= .2
-    if        
-
+       
 
 
 

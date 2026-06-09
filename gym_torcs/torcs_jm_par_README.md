@@ -167,6 +167,18 @@ DriverAction() class:
   2. __repr__():
     Provides a representation of the DriverAction after first clipping to the limits.
 
+  3. fancyout():
+    Provides a more readable output for the bot's effectiveness. 
+    Removes the gear, meta and focus entries. Then displays the mangitueds of the values present in the clutch, brake and accel entries. For any other values, it is just encoded in a string format.
+
+
+
+destringify(): Turns the string into a value or an array of strings into an array of values wherever possible.
+
+
+drive_example(): 
+  
+
 
 
 
