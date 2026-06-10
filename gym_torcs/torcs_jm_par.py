@@ -3,6 +3,7 @@ import sys
 import getopt
 import os
 import time
+import math
 PI= 3.14159265359
 
 data_size = 2**17
@@ -479,6 +480,13 @@ def drive_example(c):
         R['gear']=6
     return
 
+TARGET_SPEED=100
+STEER_GAIN=30
+CENTERING_GAIN=0.20
+BRAKE_THRESHOLD=0.9
+GEAR_SPEEDS=[0,20,40,80,100,120]
+ENABLE_TACTION_CONTOL=True
+
 ##############################################################
 #  LAGUNA SECA (WeatherTech Raceway) — TAILORED DRIVE LOGIC  #
 #                                                            #
@@ -731,7 +739,8 @@ if __name__ == "__main__":
     print("WeatherTech Raceway Laguna Seca driver loaded. Connecting...")
     for step in range(C.maxSteps, 0, -1):
         C.get_servers_input()
-        mgh(C)
+        drive_laguna(C)
+        C.respond_to_server()
 N = 0.20  # How strongly the car corrects its position toward the center of the track.
 BRAKE_THRESHOLD = 0.9  # Angle threshold for braking. Lower values brake earlier.
 GEAR_SPEEDS = [0, 20, 40, 80, 100, 180]  # Speed thresholds for gear shifting.

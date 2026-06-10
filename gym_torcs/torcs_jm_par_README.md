@@ -177,7 +177,70 @@ destringify(): Turns the string into a value or an array of strings into an arra
 
 
 drive_example(): 
+  - Fetches the server state's and the driver action's corresponding dictionaries as S and R respectively.
+  - Sets an initial target_speed for 160 mph.
+
+  It sets the driver state's steer by first considering the server state's angle sensor reading and then adjusts it by considering the car's position.
+
+  Furthermore, the acceleration is then set by considering the maximum of either 0 or the minimum of the acceleration. 
+
+  Also, the acceleration is adjusted based on the speedX's magnitude compared to the target_speed value. With an expression that can be further fine-tuned to ensure a quicker speed.
+
+  Then to better keep the vehicle under control and to prevent unneccesary spin, each wheelSpin's velocity is checked such that if the forward wheel's and backward's wheels spins have a difference of two- the acceleration is reduced.
+
+  Finally, the driver's state changes gear to better faciliate the speed range which is detected in the speedX sensor.
+
+Intermediate section contains alterable variables that can better improve the performance of the car.
+
+LAGUNA SECA
+A custom track which some functions have been based upon.
+
+LAGUNA_CORNER_SPEEDS: An array of tuples of the form (threshold,speed). Which suggests the apex speed at which the car should be travelling at the corner.
+
+laguna_corner_speed(): Looks at the shortest forward sensor reading and then selects the corresponding corner speed. If it can't be found, then 65 is returned.
+
+drive_laguna():
+  - Creates a global variable called _recovery_counter.
+  - Further creates two variables S, R which specify serverState dictionary and the driverState dictionary.
+
+  -Then it collects the entries for specific sensors under defined variable names.
+  - Furthermore, it checks the recovery counter for a positive value, if present, it will set the driverState gear, acceleration, brake and steer to specific values. The recovery counter is set to 80 if stuck>50 and the absolute value of the track_pos sensor is greter than 1.6.
+
+  Furthermore, some data from the sensors is initially collected.
+  Followed by the calculation of the minimum forward distance, diagonal difference which is used to evaluate if turning feature is enabled.
+
+  Corkscrew caution then detects the 59 foot blind drop and applies early braking.
+
+  If turning feature is enabled. Then the target_speed is set to the corner_speed at that area followed by a check that the area is not near the 54 foot drop. Otherwise, the target_speed is set to 240 mph.
+
+  The speed over the target speed (overspeed) and then the brake feature is initially set to 0. Braking is enabled if there is turning and an overspeed, where near the corkscrew the brakes are used as hard as possible. While otherwise a more progressive braking system is involved. With the driverState acceleration being set to 0.
+
+  If front distance was less than 8 and speed was greater than 20- this inidcated there was a wall ahead so no accleration and a hard brake was involved.
+
+  Also, if brake was set to 0. Then if speed was set less than 5, the acceleration was increased to maximum. Otherwise, a hard push was set such that the gap between the target speed and speed was reduced. With a minimum acceleration of 0.2 at the target speed.
+
+  Traction Control: This section checks whether the spin on the wheels will be detrimental travelling on the Laguna track and therefore corrects the acceleration of the car.
+
+  Furthermore, the angle and center gain ensure that the steer degree of the car ensure that the steering is tigheter during the direction change at T8/8A.
+
+  Finally, the gears are optimised for Laguna Seca speeds. Which in a future iteration, a model will train on training tracks to find out the optimal gear shift for certain terrain and adjust accordingly on the test tracks.
+
+  The last feature is the edge/wall correction such that the steer, brake and acceleration are adjusted to slow the car as quickly as possible.
+
+There are two systems at the moment, one which runs the model AI on the laguna_seca track, and the other on a default track instead.
+
+ Some helpful functions include:
+    1. calculate_steering(S): Calculaters the steering effect due to the set STEER_GAIN and CENTERING_GAIN, which the latter is adjusted via the trackPos.
+    2. calculate_throttle(S,R): Calculates the throttle present at the specific moment. Firstly, by checking if the speedX is less than the target speed decremented by the effect of the steer at that moment. And then adjusts the acceleration based on that moment.
+    3.apply_brakes(S): Applies brakes selectively, noting for the angle of the serverState which could indicate its position on a ramp.
+    4.shift_gears(S): Adjusts the gears such that the gear chosen can tolerate the speed of the vehicle at that moment.
+    5. traction_control(S,accel): If the option is enabled, the acceleration is altered if the spin of the wheels is above a certain threshold.
+
+
+
   
+
+
 
 
 
