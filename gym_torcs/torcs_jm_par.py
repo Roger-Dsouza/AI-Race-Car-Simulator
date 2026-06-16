@@ -4,8 +4,11 @@ import getopt
 import os
 import time
 import math
+import model
 PI= 3.14159265359
 
+#Sample neural network, which can be adjusted for sensor inputs, and the outputs to calibrate car controls.
+neural_network=model.Network([30,30,30])
 data_size = 2**17
 
 ophelp=  'Options:\n'
@@ -623,10 +626,12 @@ def drive_laguna(c):
 
     diag_diff    = abs(diag_left - diag_right)
     turning      = diag_diff > 40 or min_forward < 40
+    wide_open = wide_left > 80 and wide_right > 80
+    turning = (diag_diff > 40 or min_forward < 40) and not wide_open
 
     # Corkscrew flag: large asymmetry + short front + high speed
     # → extra-early braking to handle the 59 ft blind drop
-    corkscrew_caution = (diag_diff > 60 and min_forward < 80 and speed > 100)
+    corkscrew_caution = (diag_diff > 60 and min_forward < 120 and speed > 90)
 
     # ─────────────────────────────────────────
     # TARGET SPEED
@@ -636,6 +641,7 @@ def drive_laguna(c):
         target_speed = laguna_corner_speed(min_forward)
         if corkscrew_caution:
             target_speed = min(target_speed, 100)  # never carry too much into T8
+        target_speed = max(target_speed, 85) if min_forward > 25 else target_speed
     else:
         # Flat out — Laguna's main straight peaks ~230+ km/h for GT cars
         target_speed = 240
@@ -655,14 +661,14 @@ def drive_laguna(c):
     overspeed = speed - target_speed
     R['brake'] = 0.0  # default: no brakes
 
-    if turning and overspeed > 0:
+    if turning and overspeed > 8:
         if corkscrew_caution:
             # Harder braking for the Corkscrew — short zone, big drop
             R['brake'] = clip(overspeed / 35.0, 0.2, 0.9)
         else:
             # Progressive braking — dividing by 45 keeps it crisp
             # but not snap-lock (Laguna's zones are short)
-            R['brake'] = clip(overspeed / 45.0, 0.1, 0.75)
+            R['brake'] = clip(overspeed / 45.0, 0.0, 0.75)
         R['accel'] = 0.0
 
     elif front < 8 and speed > 20:
@@ -731,6 +737,17 @@ def drive_laguna(c):
         R['brake'] = 0.25
         R['accel'] = 0.0
 
+# FIXED — add a second tier for deep gravel
+    if 0.85 < abs(track_pos) <= 1.6:
+        R['steer'] = clip(-track_pos * 1.2, -1, 1)
+        R['brake'] = 0.25
+        R['accel'] = 0.0
+    elif abs(track_pos) > 1.6 and speed < 60:   # ← deep gravel, still moving
+        R['steer'] = clip(-track_pos * 1.5, -1, 1)
+        R['brake'] = 0.0
+        R['accel'] = 0.8                          # ← power out, don't brake!
+        R['gear']  = 1
+
     return
 
 
@@ -777,20 +794,4 @@ def traction_control(S, accel):
     return max(0.0, accel)
 
 # ================= MAIN DRIVE FUNCTION =================
-def drive_modular(c):
-    S, R = c.S.d, c.R.d
-    R['steer'] = calculate_steering(S)
-    R['accel'] = calculate_throttle(S, R)
-    R['brake'] = apply_brakes(S)
-    R['accel'] = traction_control(S, R['accel'])
-    R['gear'] = shift_gears(S)
-    return
 
-# ================= MAIN LOOP =================
-if __name__ == "__main__":
-    C = Client(p=3001)
-    for step in range(C.maxSteps, 0, -1):
-        C.get_servers_input()
-        drive_modular(C)
-        C.respond_to_server()
-    C.shutdown()
