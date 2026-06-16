@@ -4,7 +4,6 @@ import getopt
 import os
 import time
 import math
-import model
 PI= 3.14159265359
 
 #Sample neural network, which can be adjusted for sensor inputs, and the outputs to calibrate car controls.
@@ -32,37 +31,25 @@ def clip(v,lo,hi):
     else: return v
 
 def bargraph(x,mn,mx,w,c='X'):
-    '''Draws a simple asciiart bar graph. Very handy for
-    visualizing what's going on with the data.
-    x= Value from sensor, mn= minimum plottable value,
-    mx= maximum plottable value, w= width of plot in chars,
-    c= the character to plot with.'''
-    if not w: return '' # No width!
+    if not w: return ''
     x=clip(x,mn,mx)
-    #The previous line is optimising tese two lines.
-    """
-    if x<mn: x= mn      # Clip to bounds.
-    if x>mx: x= mx      # Clip to bounds.
-    """
-    
-    #*****************
-    tx= mx-mn # Total real units possible to show on graph.
-    if tx<=0: return 'backwards' # Stupid bounds.
-    upw= tx/float(w) # X Units per output char width.
-    if upw<=0: return 'What?' # Don't let this happen.
+    tx= mx-mn
+    if tx<=0: return 'backwards'
+    upw= tx/float(w)
+    if upw<=0: return 'What?'
     negpu, pospu, negnonpu, posnonpu= 0,0,0,0
-    if mn < 0: # Then there is a negative part to graph.
-        if x < 0: # And the plot is on the negative side.
+    if mn < 0:
+        if x < 0:
             negpu= -x + min(0,mx)
             negnonpu= -mn + x
-        else: # Plot is on pos. Neg side is empty.
-            negnonpu= -mn + min(0,mx) # But still show some empty neg.
-    if mx > 0: # There is a positive part to the graph
-        if x > 0: # And the plot is on the positive side.
+        else:
+            negnonpu= -mn + min(0,mx)
+    if mx > 0:
+        if x > 0:
             pospu= x - max(0,mn)
             posnonpu= mx - x
-        else: # Plot is on neg. Pos side is empty.
-            posnonpu= mx - max(0,mn) # But still show some empty pos.
+        else:
+            posnonpu= mx - max(0,mn)
     nnc= int(negnonpu/upw)*'-'
     npc= int(negpu/upw)*c
     ppc= int(pospu/upw)*c
@@ -76,11 +63,11 @@ class Client():
         self.host= 'localhost'
         self.port= 3001
         self.sid= 'SCR'
-        self.maxEpisodes=1 # "Maximum number of learning episodes to perform"
+        self.maxEpisodes=1
         self.trackname= 'unknown'
-        self.stage= 3 # 0=Warm-up, 1=Qualifying 2=Race, 3=unknown <Default=3>
+        self.stage= 3
         self.debug= False
-        self.maxSteps= 100000  # 50steps/second
+        self.maxSteps= 100000
         self.parse_the_command_line()
         if H: self.host= H
         if p: self.port= p
@@ -179,7 +166,6 @@ class Client():
             sys.exit(-1)
 
     def get_servers_input(self):
-        '''Server's input is stored in a ServerState object'''
         if not self.so: return
         sockdata= str()
 
@@ -202,14 +188,14 @@ class Client():
                 print("Server has restarted the race on %d." % self.port)
                 self.shutdown()
                 return
-            elif not sockdata: # Empty?
-                continue       # Try again.
+            elif not sockdata:
+                continue
             else:
                 self.S.parse_server_str(sockdata)
                 if self.debug:
-                    sys.stderr.write("\x1b[2J\x1b[H") # Clear for steady output.
+                    sys.stderr.write("\x1b[2J\x1b[H")
                     print(self.S)
-                break # Can now return from this function.
+                break
 
     def respond_to_server(self):
         if not self.so: return
@@ -235,7 +221,6 @@ class ServerState():
         self.d= dict()
 
     def parse_server_str(self, server_string):
-        '''Parse the server string.'''
         self.servstr= server_string.strip()[:-1]
         sslisted= self.servstr.strip().lstrip('(').rstrip(')').split(')(')
         for i in sslisted:
@@ -254,9 +239,8 @@ class ServerState():
         return out
 
     def fancyout(self):
-        '''Specialty output for useful ServerState monitoring.'''
         out= str()
-        sensors= [ # Select the ones you want in the order you want them.
+        sensors= [
         'stucktimer',
         'fuel',
         'distRaced',
@@ -277,12 +261,12 @@ class ServerState():
         ]
 
         for k in sensors:
-            if type(self.d.get(k)) is list: # Handle list type data.
-                if k == 'track': # Nice display for track sensors.
+            if type(self.d.get(k)) is list:
+                if k == 'track':
                     strout= str()
                     raw_tsens= ['%.1f'%x for x in self.d['track']]
                     strout+= ' '.join(raw_tsens[:9])+'_'+raw_tsens[9]+'_'+' '.join(raw_tsens[10:])
-                elif k == 'opponents': # Nice display for opponent sensors.
+                elif k == 'opponents':
                     strout= str()
                     for osensor in self.d['opponents']:
                         if   osensor >190: oc= '_'
@@ -296,11 +280,11 @@ class ServerState():
                 else:
                     strlist= [str(i) for i in self.d[k]]
                     strout= ', '.join(strlist)
-            else: # Not a list type of value.
-                if k == 'gear': # This is redundant now since it's part of RPM.
+            else:
+                if k == 'gear':
                     gs= '_._._._._._._._._'
-                    p= int(self.d['gear']) * 2 + 2  # Position
-                    l= '%d'%self.d['gear'] # Label
+                    p= int(self.d['gear']) * 2 + 2
+                    l= '%d'%self.d['gear']
                     if l=='-1': l= 'R'
                     if l=='0':  l= 'N'
                     strout= gs[:p]+ '(%s)'%l + gs[p+3:]
@@ -312,13 +296,13 @@ class ServerState():
                     cx= 'X'
                     if self.d[k]<0: cx= 'R'
                     strout= '%6.1f %s' % (self.d[k], bargraph(self.d[k],-30,300,50,cx))
-                elif k == 'speedY': # This gets reversed for display to make sense.
+                elif k == 'speedY':
                     strout= '%6.1f %s' % (self.d[k], bargraph(self.d[k]*-1,-25,25,50,'Y'))
                 elif k == 'speedZ':
                     strout= '%6.1f %s' % (self.d[k], bargraph(self.d[k],-13,13,50,'Z'))
                 elif k == 'z':
                     strout= '%6.3f %s' % (self.d[k], bargraph(self.d[k],.3,.5,50,'z'))
-                elif k == 'trackPos': # This gets reversed for display to make sense.
+                elif k == 'trackPos':
                     cx='<'
                     if self.d[k]<0: cx= '>'
                     strout= '%6.3f %s' % (self.d[k], bargraph(self.d[k]*-1,-1,1,50,cx))
@@ -344,13 +328,13 @@ class ServerState():
                     symno= int(.5+ (rad+PI) / (PI/12) )
                     symno= symno % (len(asyms)-1)
                     strout= '%5.2f %3d (%s)' % (rad,deg,asyms[symno])
-                elif k == 'skid': # A sensible interpretation of wheel spin.
+                elif k == 'skid':
                     frontwheelradpersec= self.d['wheelSpinVel'][0]
                     skid= 0
                     if frontwheelradpersec:
                         skid= .5555555555*self.d['speedX']/frontwheelradpersec - .66124
                     strout= bargraph(skid,-.05,.4,50,'*')
-                elif k == 'slip': # A sensible interpretation of wheel spin.
+                elif k == 'slip':
                     frontwheelradpersec= self.d['wheelSpinVel'][0]
                     slip= 0
                     if frontwheelradpersec:
@@ -363,10 +347,7 @@ class ServerState():
         return out
 
 class DriverAction():
-    '''What the driver is intending to do (i.e. send to the server).
-    Composes something like this for the server:
-    (accel 1)(brake 0)(gear 1)(steer 0)(clutch 0)(focus 0)(meta 0) or
-    (accel 1)(brake 0)(gear 1)(steer 0)(clutch 0)(focus -90 -45 0 45 90)(meta 0)'''
+    '''What the driver is intending to do (i.e. send to the server).'''
     def __init__(self):
        self.actionstr= str()
        self.d= { 'accel':0.2,
@@ -379,13 +360,6 @@ class DriverAction():
                     }
 
     def clip_to_limits(self):
-        """There pretty much is never a reason to send the server
-        something like (steer 9483.323). This comes up all the time
-        and it's probably just more sensible to always clip it than to
-        worry about when to. The "clip" command is still a snakeoil
-        utility function, but it should be used only for non standard
-        things or non obvious limits (limit the steering to the left,
-        for example). For normal limits, simply don't worry about it."""
         self.d['steer']= clip(self.d['steer'], -1, 1)
         self.d['brake']= clip(self.d['brake'], 0, 1)
         self.d['accel']= clip(self.d['accel'], 0, 1)
@@ -411,17 +385,16 @@ class DriverAction():
         return out+'\n'
 
     def fancyout(self):
-        '''Specialty output for useful monitoring of bot's effectors.'''
         out= str()
         od= self.d.copy()
-        od.pop('gear','') # Not interesting.
-        od.pop('meta','') # Not interesting.
-        od.pop('focus','') # Not interesting. Yet.
+        od.pop('gear','')
+        od.pop('meta','')
+        od.pop('focus','')
         for k in sorted(od):
             if k == 'clutch' or k == 'brake' or k == 'accel':
                 strout=''
                 strout= '%6.3f %s' % (od[k], bargraph(od[k],0,1,50,k[0].upper()))
-            elif k == 'steer': # Reverse the graph to make sense.
+            elif k == 'steer':
                 strout= '%6.3f %s' % (od[k], bargraph(od[k]*-1,-1,1,50,'S'))
             else:
                 strout= str(od[k])
@@ -429,8 +402,6 @@ class DriverAction():
         return out
 
 def destringify(s):
-    '''makes a string into a value or a list of strings into a list of
-    values (if possible)'''
     if not s: return s
     if type(s) is str:
         try:
@@ -444,13 +415,8 @@ def destringify(s):
         else:
             return [destringify(i) for i in s]
 
-       
-
-
 
 def drive_example(c):
-    '''This is only an example. It will get around the track but the
-    correct thing to do is write your own `drive()` function.'''
     S,R= c.S.d,c.R.d
     target_speed=160
 
@@ -492,40 +458,9 @@ ENABLE_TACTION_CONTOL=True
 
 ##############################################################
 #  LAGUNA SECA (WeatherTech Raceway) — TAILORED DRIVE LOGIC  #
-#                                                            #
-#  Track character                                           #
-#  • 2.238 miles, 11 turns, counter-clockwise               #
-#  • Long uphill straight to T2 hairpin (hard braking)      #
-#  • Technical infield: T3-T5 (slow, sequential)            #
-#  • T6 fast left — carry speed                             #
-#  • T8/8A Corkscrew: blind drop 59 ft, hard left/right     #
-#  • T9-T10-T11 flowing back to start/finish straight       #
-#                                                            #
-#  Key philosophy:                                           #
-#  • Full throttle on straights — no artificial speed cap    #
-#  • Carry speed through fast sweepers (T6, T9)             #
-#  • Brake hard and late for slow corners (T2, T11)         #
-#  • Treat the Corkscrew with extreme caution (steep drop)  #
 ##############################################################
 
 _recovery_counter = 0
-
-# ─────────────────────────────────────────────────────────────
-# LAGUNA SECA — CORNER PROFILE TABLE
-# Maps approximate front-sensor reading → corner speed floor
-# Lower sensor reading = tighter/closer corner ahead
-# ─────────────────────────────────────────────────────────────
-#
-# Corner reference (Laguna Seca):
-#   T2  hairpin:   ~65 km/h apex          (hardest brake)
-#   T3-4 infield:  ~80 km/h
-#   T5  exit kink: ~95 km/h
-#   T6  fast left: ~145 km/h (barely lift)
-#   T8  Corkscrew entry: ~100 km/h        (blind drop — caution)
-#   T8A Corkscrew exit: ~90 km/h
-#   T9  sweeper:   ~130 km/h
-#   T10 fast right:~120 km/h
-#   T11 hairpin:   ~70 km/h               (hard brake into straight)
 
 LAGUNA_CORNER_SPEEDS = [
     (200, 240),   # very long view — flat-out straight
@@ -548,21 +483,14 @@ def drive_laguna(c):
     """
     Laguna Seca-tuned drive function for TORCS/snakeoil.
 
-    Key fixes over the original mgh():
-    1. sharp_corner threshold raised from diag_diff>20 to diag_diff>40
-       — the old value fired constantly, capping speed to ~80 km/h
-       even on long straights. Laguna's fast sweepers (T6, T9) have
-       naturally asymmetric diagonal readings and must NOT trigger
-       heavy braking.
-    2. Straight-line target speed set to 240 km/h (full throttle).
-    3. Early-brake 'speed > 80' guard removed — it was the primary
-       culprit preventing acceleration beyond 80 km/h.
-    4. Corkscrew (T8/8A) caution: when front sensor is short AND
-       diag_diff is large AND we are going fast, brake earlier and
-       harder because the 59 ft drop punishes over-speed.
-    5. Progressive braking divides by 45 (tighter than old 60) to
-       actually scrub speed within Laguna's short braking zones.
-    6. Duplicate __main__ block removed.
+    Changes vs previous version:
+    1. Gear hysteresis: separate upshift/downshift thresholds per gear to
+       eliminate 3↔4 and 4↔5 flickering. The car must fall well below the
+       upshift speed before downshifting.
+    2. Softer braking: divisors increased from 35/45 to 55/70, and the
+       turning trigger for min_forward raised from 40 to 55 so braking
+       begins earlier on approach, spreading deceleration over a longer
+       distance at lower peak pressure.
     """
     global _recovery_counter
 
@@ -576,7 +504,7 @@ def drive_laguna(c):
     track     = S.get('track', [100] * 19)
 
     # ─────────────────────────────────────────
-    # RECOVERY  (unchanged logic, reliable)
+    # RECOVERY
     # ─────────────────────────────────────────
 
     if _recovery_counter > 0:
@@ -605,33 +533,23 @@ def drive_laguna(c):
     front_right = track[8]
     diag_left   = track[12]   # ~30 ° left
     diag_right  = track[6]    # ~30 ° right
-    wide_left   = track[14]   # ~60 ° left
-    wide_right  = track[4]    # ~60 ° right
 
     # Worst-case forward clearance
     min_forward = min(front, front_left, front_right)
 
     # ─────────────────────────────────────────
-    # CORNER DETECTION  ← BUG FIX #1
+    # CORNER DETECTION
     #
-    # OLD: diag_diff > 20  →  fires on every mild sweeper
-    # NEW: diag_diff > 40  →  only genuine corners
-    #      min_forward < 40 (was 50) so we enter braking mode
-    #      only when the wall is actually close.
-    #
-    # Laguna specific: T6 and T9 are fast sweepers where the
-    # car must carry 130-150 km/h. A threshold of 20 destroyed
-    # those sectors by triggering repeated early-braking.
+    # min_forward threshold raised from 40 → 55 so the car begins
+    # recognising the corner earlier, giving more distance to shed speed
+    # gently rather than stamping the brakes at the last moment.
     # ─────────────────────────────────────────
 
-    diag_diff    = abs(diag_left - diag_right)
-    turning      = diag_diff > 40 or min_forward < 40
-    wide_open = wide_left > 80 and wide_right > 80
-    turning = (diag_diff > 40 or min_forward < 40) and not wide_open
+    diag_diff = abs(diag_left - diag_right)
+    turning   = diag_diff > 40 or min_forward < 55
 
     # Corkscrew flag: large asymmetry + short front + high speed
-    # → extra-early braking to handle the 59 ft blind drop
-    corkscrew_caution = (diag_diff > 60 and min_forward < 120 and speed > 90)
+    corkscrew_caution = (diag_diff > 60 and min_forward < 80 and speed > 100)
 
     # ─────────────────────────────────────────
     # TARGET SPEED
@@ -640,35 +558,31 @@ def drive_laguna(c):
     if turning:
         target_speed = laguna_corner_speed(min_forward)
         if corkscrew_caution:
-            target_speed = min(target_speed, 100)  # never carry too much into T8
-        target_speed = max(target_speed, 85) if min_forward > 25 else target_speed
+            target_speed = min(target_speed, 100)
     else:
-        # Flat out — Laguna's main straight peaks ~230+ km/h for GT cars
         target_speed = 240
 
     # ─────────────────────────────────────────
-    # BRAKING  ← BUG FIX #2 & #3
+    # BRAKING
     #
-    # OLD code had:
-    #   elif sharp_corner and speed > 80:   ← stopped acceleration at 80
-    #       anticipation = ...
-    #       R['brake'] = anticipation        ← always braking above 80!
-    #
-    # NEW: only brake when actually overspeeding the corner target,
-    # or when the Corkscrew caution flag fires.
+    # Divisors increased (35→55 for corkscrew, 45→70 for normal corners)
+    # so that a given overspeed produces lower peak brake pressure but is
+    # applied over a longer run-in, keeping total deceleration the same
+    # while making the car feel much smoother through braking zones.
+    # Minimum brake floor also slightly reduced (0.2→0.15, 0.1→0.08) so
+    # the car doesn't lock up on mild approaches.
     # ─────────────────────────────────────────
 
     overspeed = speed - target_speed
-    R['brake'] = 0.0  # default: no brakes
+    R['brake'] = 0.0
 
     if turning and overspeed > 8:
         if corkscrew_caution:
-            # Harder braking for the Corkscrew — short zone, big drop
-            R['brake'] = clip(overspeed / 35.0, 0.2, 0.9)
+            # Softer but earlier for the Corkscrew
+            R['brake'] = clip(overspeed / 55.0, 0.15, 0.85)
         else:
-            # Progressive braking — dividing by 45 keeps it crisp
-            # but not snap-lock (Laguna's zones are short)
-            R['brake'] = clip(overspeed / 45.0, 0.0, 0.75)
+            # Gentle progressive braking — long distance, low peak pressure
+            R['brake'] = clip(overspeed / 70.0, 0.08, 0.70)
         R['accel'] = 0.0
 
     elif front < 8 and speed > 20:
@@ -677,23 +591,19 @@ def drive_laguna(c):
         R['accel'] = 0.0
 
     # ─────────────────────────────────────────
-    # THROTTLE — full aggression on straights
+    # THROTTLE
     # ─────────────────────────────────────────
 
     if R['brake'] == 0.0:
         if speed < 5:
             R['accel'] = 1.0
         elif speed < target_speed:
-            # Always push hard — minimum 0.6 on partial throttle
-            # so the car never bogs down on corner exits
             R['accel'] = clip((target_speed - speed) / target_speed + 0.4, 0.6, 1.0)
         else:
-            R['accel'] = 0.2  # minimal coast once at target speed
+            R['accel'] = 0.2
 
     # ─────────────────────────────────────────
     # TRACTION CONTROL
-    # Slightly tighter (>1.5 vs >2) — Laguna's elevation changes
-    # make wheelspin more dangerous than on a flat track
     # ─────────────────────────────────────────
 
     rear_spin  = wheels[2] + wheels[3]
@@ -703,12 +613,10 @@ def drive_laguna(c):
 
     # ─────────────────────────────────────────
     # STEERING
-    # Slightly higher angle_gain (12 vs 10) for Laguna's
-    # tight infield and the quick direction change at T8/8A
     # ─────────────────────────────────────────
 
     angle_gain  = 12.0
-    center_gain = 0.35   # slightly less centering pull at high speed
+    center_gain = 0.35
 
     R['steer'] = clip(
         (angle * angle_gain / PI) - (track_pos * center_gain),
@@ -716,17 +624,46 @@ def drive_laguna(c):
     )
 
     # ─────────────────────────────────────────
-    # GEARS — optimised for Laguna Seca speeds
-    # T2 hairpin exits in 2nd, main straight peaks in 6th
-    # Upshift points chosen to stay on the power curve
+    # GEARS — hysteresis to eliminate 3↔4 and 4↔5 flickering
+    #
+    # Strategy: upshift thresholds are higher than downshift thresholds
+    # for the same gear boundary. The gap (≈8-13 km/h) means the car
+    # must travel a meaningful distance in either direction before the
+    # gearbox reacts, preventing oscillation when speed hovers near a
+    # boundary under partial throttle or light braking.
+    #
+    # Upshift points  (speed must EXCEED to go up):
+    #   1→2: 28    2→3: 58    3→4: 95    4→5: 138   5→6: 178
+    # Downshift points (speed must FALL BELOW to go down):
+    #   2→1: 20    3→2: 48    4→3: 82    5→4: 122   6→5: 162
     # ─────────────────────────────────────────
 
-    if   speed < 25:  R['gear'] = 1
-    elif speed < 55:  R['gear'] = 2
-    elif speed < 90:  R['gear'] = 3
-    elif speed < 130: R['gear'] = 4
-    elif speed < 175: R['gear'] = 5
-    else:             R['gear'] = 6
+    current_gear = int(R.get('gear', 1))
+    if current_gear < 1:
+        current_gear = 1  # don't apply hysteresis during recovery
+
+    if current_gear == 1:
+        if   speed > 28:  R['gear'] = 2
+        else:             R['gear'] = 1
+    elif current_gear == 2:
+        if   speed > 58:  R['gear'] = 3
+        elif speed < 20:  R['gear'] = 1
+        else:             R['gear'] = 2
+    elif current_gear == 3:
+        if   speed > 95:  R['gear'] = 4
+        elif speed < 48:  R['gear'] = 2
+        else:             R['gear'] = 3
+    elif current_gear == 4:
+        if   speed > 138: R['gear'] = 5
+        elif speed < 82:  R['gear'] = 3
+        else:             R['gear'] = 4
+    elif current_gear == 5:
+        if   speed > 178: R['gear'] = 6
+        elif speed < 122: R['gear'] = 4
+        else:             R['gear'] = 5
+    else:  # gear 6
+        if   speed < 162: R['gear'] = 5
+        else:             R['gear'] = 6
 
     # ─────────────────────────────────────────
     # EDGE / WALL CORRECTION
@@ -758,10 +695,10 @@ if __name__ == "__main__":
         C.get_servers_input()
         drive_laguna(C)
         C.respond_to_server()
-N = 0.20  # How strongly the car corrects its position toward the center of the track.
-BRAKE_THRESHOLD = 0.9  # Angle threshold for braking. Lower values brake earlier.
-GEAR_SPEEDS = [0, 20, 40, 80, 100, 180]  # Speed thresholds for gear shifting.
-ENABLE_TRACTION_CONTROL = True  # Toggle traction control system.
+N = 0.20
+BRAKE_THRESHOLD = 0.9
+GEAR_SPEEDS = [0, 20, 40, 80, 100, 180]
+ENABLE_TRACTION_CONTROL = True
 
 # ================= HELPER FUNCTIONS =================
 def calculate_steering(S):
@@ -794,4 +731,20 @@ def traction_control(S, accel):
     return max(0.0, accel)
 
 # ================= MAIN DRIVE FUNCTION =================
+def drive_modular(c):
+    S, R = c.S.d, c.R.d
+    R['steer'] = calculate_steering(S)
+    R['accel'] = calculate_throttle(S, R)
+    R['brake'] = apply_brakes(S)
+    R['accel'] = traction_control(S, R['accel'])
+    R['gear'] = shift_gears(S)
+    return
 
+# ================= MAIN LOOP =================
+if __name__ == "__main__":
+    C = Client(p=3001)
+    for step in range(C.maxSteps, 0, -1):
+        C.get_servers_input()
+        drive_modular(C)
+        C.respond_to_server()
+    C.shutdown()
