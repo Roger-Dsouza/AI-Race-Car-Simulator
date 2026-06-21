@@ -28,13 +28,17 @@ class Network(object):
         z_out=np.dot(self.weights[-1],a)+self.biases[-1]
         z_out=np.clip(z_out,-500,500)
 
-        output=np.zeros((4,1))
-        steer=np.tanh(z_out[0])
-        accel=sigmoid(z_out[1])
-        brake=sigmoid(z_out[2])
-        gear=z_out[3]
+        output=np.array([
+            np.tanh(z_out[0]),
+            sigmoid(z_out[1]),
+            sigmoid(z_out[2]),
+            sigmoid(z_out[3])
+
+
+
+        ]).reshape(-1,1)
         
-        return z_out
+        return output
 
     def SGD(self,training_data,epochs,mini_batch_size,eta,test_data=None):
         """ Trains the neural network by using stochastic gradient descent on a 
@@ -84,11 +88,31 @@ class Network(object):
         activation=x
         activations=[x]
         zs=[]
-        for b,w in zip(self.biases,self.weights):
+        for b,w in zip(self.biases[:-1],self.weights[:-1]):
             z=np.dot(w,activation)+b
             zs.append(z)
             activation=sigmoid(z)
             activations.append(activation)
+
+        z_out=np.dot(self.weights[-1],activation)+self.biases[-1]
+        zs.append(z_out)
+
+        out_activation=np.zeros_like(z_out)
+        out_activation[0]=np.tanh(z_out[0])
+        out_activation[1]=sigmoid(z_out[1])
+        out_activation[2]=sigmoid(z_out[2])
+        out_activation[3]=sigmoid(z_out[3])
+        activations.append(out_activation)
+
+
+        #Backward Pass for output activations.
+        sp=np.zeros_like(z_out)
+        sp[0]=1.0-out_activation[0]**2
+        sp[1]=out_activation[1]*(1.0-out_activation[1])
+        sp[2]=out_activation[2]*(1.0-out_activation[2])
+        sp[3]=out_activation[3]*(1.0-out_activation[3])
+
+
 
         delta=self.cost_derivative(activations[-1],y)*sigmoid_prime(zs[-1])
         print("Delta:",delta)

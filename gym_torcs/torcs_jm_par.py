@@ -514,8 +514,7 @@ def construct_target(action,reward,R):
     ]).reshape(-1,1)
 
     #Trust the network or the previous algorithm.
-    blend=np.clip(0.5+reward*0.1,0.0,1.0)
-    target=blend*action+(1.0-blend)*action
+    target=action
 
     #Clip to defined ranges.
     target[0]=np.clip(target[0],-1,1)
@@ -629,7 +628,7 @@ def run_lap(network,client,eta):
                 network.trust=min(network.trust+0.05,0.95)
             else:
                 network.trust=max(network.trust-0.02,0.05)
-            network_trust=network.trust
+            network_thrust=network.trust
 
             if cost<best_cost:
                 best_cost=cost
@@ -1013,4 +1012,4 @@ if __name__ == "__main__":
         network.biases=[np.array(b) for b in data['biases']]
         network.trust=data.get('trust',0.1)
 
-    laguna_net(network,C)
+    train_laguna(network,C,3)
