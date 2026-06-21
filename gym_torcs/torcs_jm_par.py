@@ -4,8 +4,18 @@ import getopt
 import os
 import time
 import math
-import model
+import torcs_model as model
+import numpy as np
+import random
+import json
+import threading
+import queue
 PI= 3.14159265359
+
+#Parrallel Processing Components.
+experience_queue=queue.Queue()
+training_active=threading.Event()
+weights_lock=threading.Lock()
 
 data_size = 2**17
 
@@ -458,7 +468,284 @@ ENABLE_TACTION_CONTOL=True
 ##############################################################
 #  LAGUNA SECA (WeatherTech Raceway) — TAILORED DRIVE LOGIC  #
 ##############################################################
+#Added a feature which uses the neural network approach into the present algorithm.
 
+def get_sensor_vector(S):
+    #compresses sensor readings into a normalised column vector.
+    track=S.get('track',[100]*19)
+    wheels=S.get('wheelSpinVel',[0]*4)
+
+    inputs=[
+        *[t/200.0 for t in track],
+        S.get('speedX',0)/300.0,
+        S.get('speedY',0)/50.0,
+        S.get('angle',0)/PI,
+        S.get('trackPos',0),
+        *[w/100.0 for w in wheels],
+        S.get('rpm',0)/10000.0,
+        S.get('gear',1)/6.0
+    ]
+    return np.array(inputs).reshape(-1,1)
+
+def apply_action(R,action):
+    #Translates the outputs of the neural networks into car controls.
+    action=action.flatten()
+    R['steer']=float(np.clip(action[0],-1,1))
+    R['accel']=float(np.clip(action[1],0,1))
+    R['brake']=float(np.clip(action[2],0,1))
+
+    #Rounds gear output to the nearest gear setting.
+    gear_raw=float(np.squeeze(action[3]))
+    gear_val=int(np.clip(round(gear_raw*6),1,6))
+    R['gear']=gear_val
+                 
+def construct_target(action,reward,R):
+    """
+        We want the neural network approach to focus on improving the manual
+        algorithm we have. So, this is doing what the 
+    
+    """
+
+    action=np.array([
+        R['steer'],
+        R['accel'],
+        R['brake'],
+        R['gear']/6.0
+    ]).reshape(-1,1)
+
+    #Trust the network or the previous algorithm.
+    blend=np.clip(0.5+reward*0.1,0.0,1.0)
+    target=blend*action+(1.0-blend)*action
+
+    #Clip to defined ranges.
+    target[0]=np.clip(target[0],-1,1)
+    target[1]=np.clip(target[1],0,1)
+    target[2]=np.clip(target[2],0,1)
+    target[3]=np.clip(target[3],0,1)
+
+    return target
+
+def run_lap(network,client,eta):
+    """
+        -Runs one full lap using the drive_laguna and neural network. Computes cost function and reward, then retrains.
+        - We have a function that does a decent job, the network should improve it.
+        
+
+        Three Steps:
+        1. drive_laguna computes its suggestion.
+        2. network computes its suggestion.
+        3. The two suggestions are blended together, and ideally the network should do better.
+    
+    
+    
+    """
+    experiences=[]
+    recovery_count=0
+    lap_start_damage=client.S.d.get('damage',0)
+    prev_lap_time=0
+    lap_num=0
+    best_cost=float('inf')
+
+    network_thrust=getattr(network,'trust',0.2)
+
+    for step in range(client.maxSteps):
+        client.get_servers_input()
+
+        #Client closed connection.
+        if client.so is None:
+            break
+
+        S=client.S.d
+        R=client.R.d
+
+        if 'speedX' not in S:
+            continue
+
+        #Laguna's implementation.
+        drive_laguna(client)
+        R_laguna={
+            'steer':R['steer'],
+            'accel':R['accel'],
+            'brake':R['brake'],
+            'gear':R['gear']
+        }
+        #Network's suggestion
+        sensors=get_sensor_vector(S)
+        network_action=network.feedForward(sensors)
+
+        #Blending
+        laguna_action=np.array([R_laguna['steer'],R_laguna['accel'],R_laguna['brake'],R_laguna['gear']/6.0]).reshape(-1,1)
+
+        if np.any(np.isnan(network_action)) or np.any(np.isinf(network_action)):
+            blended_action=laguna_action
+        else:
+            blended_action=network_thrust*network_action+(1-network_thrust)*laguna_action
+
+
+        if R_laguna['gear']==-1:
+            apply_action(R,laguna_action)
+            recovery_count+=1
+        else:
+            apply_action(R,blended_action)
+
+        experiences.append((sensors,blended_action,R_laguna))
+        client.respond_to_server()
+
+        current_lap_time=S.get('lastLapTime',0)
+        if current_lap_time>0 and current_lap_time!=prev_lap_time:
+            damage_delta=S.get('damage',0)-lap_start_damage
+            collisions=damage_delta/100.0
+
+            cost=current_lap_time+(recovery_count*5)+(collisions*3)
+            reward=(best_cost-cost)/max(best_cost,1.0)
+
+            training_data=[]
+            for sns,act,lag in experiences:
+                target=construct_target(act,reward,lag)
+                training_data.append((sns,target))
+
+            mini_batch_size=32
+            random.shuffle(training_data)
+            mini_batches=[
+                training_data[k:k+mini_batch_size] for k in range(0,len(training_data),mini_batch_size)]
+            
+
+            nan_detected = any(np.any(np.isnan(w)) for w in network.weights) or any(np.any(np.isnan(b)) for b in network.biases)
+            
+            for m in mini_batches:
+                network.update_mini_batch(m,eta)
+
+            if nan_detected:
+                print("WARNING: Training produced NaN weights! Reverting to last good state.")
+                network.weights = [np.array(w) for w in last_good_weights]
+                network.biases  = [np.array(b) for b in last_good_biases]
+            else:
+    # Only update the "last good" snapshot if everything is still sane
+                last_good_weights = [w.copy() for w in network.weights]
+                last_good_biases  = [b.copy() for b in network.biases]
+
+
+            if reward>0:
+                network.trust=min(network.trust+0.05,0.95)
+            else:
+                network.trust=max(network.trust-0.02,0.05)
+            network_trust=network.trust
+
+            if cost<best_cost:
+                best_cost=cost
+                with open('weights.json','w') as f:
+                    json.dump({
+                        'weights':[w.tolist() for w in network.weights],
+                        'biases':[b.tolist() for b in network.biases],
+                        'trust':network.trust,
+                        'best_cost':best_cost,
+                        'lap':lap_num
+                    },f)
+
+            eta=max(eta*0.99,0.00001)
+
+            experiences=[]
+            recovery_count=0
+            lap_start_damage=S.get('damage',0)
+            lap_num+=1
+        prev_lap_time=current_lap_time
+    
+    client.shutdown()
+
+#Defines a drive thread.
+def driving_thread(client):
+    #This thread is for driving.
+    for step in range(client.maxSteps):
+        client.get_servers_input()
+
+        if client is None:
+            #Stops training thread.
+            training_active.clear()
+            break
+
+        S=client.S.d
+        R=client.R.d
+
+        if 'speedX' not in S:
+            continue
+
+        drive_laguna(client)
+        laguna_out=np.array([R['steer'],R['accel'],R['brake'],R['gear']/6.0]).reshape(-1,1)
+
+        sensors=get_sensor_vector(S)
+
+        client.respond_to_server()
+
+        if not np.any(np.isnan(laguna_out)):
+            experience_queue.put((sensors,laguna_out))
+        else:
+            print("Erroneous data detected.")
+    
+    client.shutdown()
+
+def training_thread(network,eta,batch_size=32):
+    print("Thread started.")
+    last_good_weights=[w.copy() for w in network.weights]
+    last_good_biases=[b.copy() for b in network.biases]
+
+    buffer=[]
+
+    if not training_active.is_set():
+        print("Selection error.")
+    else:
+        print("Thread activation is set.")
+
+    while training_active.is_set():
+        try:
+            item=experience_queue.get(timeout=0.01)
+            buffer.append(item)
+        except queue.Empty:
+            continue
+
+        if len(buffer)>=batch_size:
+            print("Onboard")
+            with weights_lock:
+                print(network,eta)
+                network.update_mini_batch(buffer,eta)
+
+                if any(np.any(np.isnan(w)) for w in network.weights):
+                    network.weights=[w.copy() for w in last_good_weights]
+                    network.biases=[b.copy() for b in last_good_biases]
+                else:
+                    network.weights=[w.copy() for w in network.weights]
+                    network.biases=[b.copy() for b in network.biases]
+
+                buffer=[]
+        else:
+            print("huh?")
+
+def train_laguna(network,client,eta):
+    
+    training_active.set()
+
+    drive_t=threading.Thread(target=driving_thread,args=(client,))
+    train_t=threading.Thread(target=training_thread,args=(network,eta))
+
+    drive_t.start()
+    train_t.start()
+
+    drive_t.join()            #Waits for the thread to finish.
+    training_active.clear()   #Switches training 
+    train_t.join()
+
+    with open('weights.json','w') as f:
+        json.dump({
+            'weights': [w.tolist() for w in network.weights],
+            'biases':  [b.tolist() for b in network.biases],
+            'mode':    'imitation-threaded'
+        },f,indent=2)
+
+
+
+
+
+
+            
 _recovery_counter = 0
 
 LAGUNA_CORNER_SPEEDS = [
@@ -477,14 +764,9 @@ def laguna_corner_speed(sensor_min):
             return speed
     return 65  # absolute floor
 
-def laguna_train():
-    #A solo racing would mean inputs are just sensor inputs.
-    network=model.Network([29,30,30,30,])
 
 
 def drive_laguna(c):
-
-    neural_network=model.Network([29,30,30,10])
 
     """
     Laguna Seca-tuned drive function for TORCS/snakeoil.
@@ -691,47 +973,44 @@ def drive_laguna(c):
 
     return
 
+def laguna_net(network,client):
+    for step in range(client.maxSteps):
+        client.get_servers_input()
+
+        if client.so is None:
+            break
+
+        S=client.S.d
+        R=client.R.d
+
+        if 'speedX' not in S:
+            continue
+
+        sensors=get_sensor_vector(S)
+
+        network_action=network.feedForward(sensors)
+
+        if np.any(np.isnan(network_action)) or np.any(np.isinf(network_action)):
+            if np.any(np.isnan(network_action)):
+                print("NaN present, corrupt output.")
+            elif np.any(np.isinf(network_action)):
+                print("Output blew up, corrupt output.")
+            continue
+        else:
+            apply_action(R,network_action)
+
+        client.respond_to_server()
 
 if __name__ == "__main__":
-    C = Client(t='laguna_seca', p=3001)
-    print("WeatherTech Raceway Laguna Seca driver loaded. Connecting...")
-    for step in range(C.maxSteps, 0, -1):
-        C.get_servers_input()
-        drive_laguna(C)
-        C.respond_to_server()
-N = 0.20
-BRAKE_THRESHOLD = 0.9
-GEAR_SPEEDS = [0, 20, 40, 80, 100, 180]
-ENABLE_TRACTION_CONTROL = True
+    C=Client(t="laguna_seca",p=3001,e=10)
 
-# ================= HELPER FUNCTIONS =================
-def calculate_steering(S):
-    steer = (S['angle'] * STEER_GAIN / math.pi) - (S['trackPos'] * CENTERING_GAIN)
-    return max(-1, min(1, steer))
+    network=model.Network([29,30,30,30,4],0.11)
 
-def calculate_throttle(S, R):
-    if S['speedX'] < TARGET_SPEED - (R['steer'] * 2.5):
-        accel = min(1.0, R['accel'] + 0.4)
-    else:
-        accel = max(0.0, R['accel'] - 0.2)
-    if S['speedX'] < 10:
-        accel += 1 / (S['speedX'] + 0.1)
-    return max(0.0, min(1.0, accel))
+    if os.path.exists('weights.json'):
+        with open('weights.json','r') as f:
+            data=json.load(f)
+        network.weights=[np.array(w) for w in data['weights']]
+        network.biases=[np.array(b) for b in data['biases']]
+        network.trust=data.get('trust',0.1)
 
-def apply_brakes(S):
-    return 0.3 if abs(S['angle']) > BRAKE_THRESHOLD else 0.0
-
-def shift_gears(S):
-    gear = 1
-    for i, speed in enumerate(GEAR_SPEEDS):
-        if S['speedX'] > speed:
-            gear = i + 1
-    return min(gear, 6)
-
-def traction_control(S, accel):
-    if ENABLE_TRACTION_CONTROL:
-        if ((S['wheelSpinVel'][2] + S['wheelSpinVel'][3]) - (S['wheelSpinVel'][0] + S['wheelSpinVel'][1])) > 2:
-            accel -= 0.1
-    return max(0.0, accel)
-
-# ================= MAIN DRIVE FUNCTION =================
+    laguna_net(network,C)
