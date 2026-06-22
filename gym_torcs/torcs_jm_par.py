@@ -10,6 +10,7 @@ import random
 import json
 import threading
 import queue
+
 PI= 3.14159265359
 
 #Parrallel Processing Components.
@@ -612,7 +613,7 @@ def run_lap(network,client,eta):
             nan_detected = any(np.any(np.isnan(w)) for w in network.weights) or any(np.any(np.isnan(b)) for b in network.biases)
             
             for m in mini_batches:
-                network.update_mini_batch(m,eta)
+                network.update_mini_batch(m,eta,1)
 
             if nan_detected:
                 print("WARNING: Training produced NaN weights! Reverting to last good state.")
@@ -705,7 +706,7 @@ def training_thread(network,eta,batch_size=32):
             print("Onboard")
             with weights_lock:
                 print(network,eta)
-                network.update_mini_batch(buffer,eta)
+                network.update_mini_batch(buffer,eta,1)
 
                 if any(np.any(np.isnan(w)) for w in network.weights):
                     network.weights=[w.copy() for w in last_good_weights]
@@ -714,9 +715,10 @@ def training_thread(network,eta,batch_size=32):
                     network.weights=[w.copy() for w in network.weights]
                     network.biases=[b.copy() for b in network.biases]
 
+                network.evaluate(buffer)
                 buffer=[]
         else:
-            print("huh?")
+            continue
 
 def train_laguna(network,client,eta):
     
@@ -1012,4 +1014,4 @@ if __name__ == "__main__":
         network.biases=[np.array(b) for b in data['biases']]
         network.trust=data.get('trust',0.1)
 
-    train_laguna(network,C,3)
+    laguna_net(network,C)

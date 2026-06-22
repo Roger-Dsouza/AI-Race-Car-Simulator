@@ -53,14 +53,14 @@ class Network(object):
                 for k in range(0,n,mini_batch_size)]
             
             for mini in mini_batches:
-                self.update_mini_batch(mini,eta)
+                self.update_mini_batch(mini,eta,1)
 
             if test_data:
                 print ("Epoch {0}: {1} / {2}".format(j, self.evaluate(test_data), n_test))
             else:
                 print("Epoch {0} complete".format(j))
 
-    def update_mini_batch(self,mini_batch,eta):
+    def update_mini_batch(self,mini_batch,eta,steer_grad_clip=None):
         """
             Updates network's weights and biases by applying gradient descent using backpropogation
             on a single mini batch.
@@ -73,6 +73,16 @@ class Network(object):
             delta_nabla_b,delta_nabla_w=self.backprop(x,y)
             nabla_b=[nb+dnb for nb,dnb in zip(nabla_b,delta_nabla_b)]
             nabla_w=[nw+dnw for nw,dnw in zip(nabla_w,delta_nabla_w)]
+
+
+        steer_grad_norm=np.linalg.norm(nabla_w[-1][0])
+        print(f"Norm:{steer_grad_norm:.4f}")
+
+        if steer_grad_clip is not None:
+            np.clip(nabla_w[-1][0],-steer_grad_clip,steer_grad_clip,out=nabla_w[-1][0])
+            np.clip(nabla_b[-1][0],-steer_grad_clip,steer_grad_clip,out=nabla_b[-1][0])
+
+
 
         self.weights=[w-(eta/len(mini_batch))*nw
                       for w,nw in zip(self.weights,nabla_w)]
@@ -114,8 +124,8 @@ class Network(object):
 
 
 
-        delta=self.cost_derivative(activations[-1],y)*sigmoid_prime(zs[-1])
-        print("Delta:",delta)
+        delta=self.cost_derivative(activations[-1],y)*sp
+               
         nabla_b[-1]=delta
         nabla_w[-1]=np.dot(delta,activations[-2].transpose())
 
@@ -136,8 +146,29 @@ class Network(object):
         return (nabla_b,nabla_w)
     
     def evaluate(self,test_data):
-        test_results=[(np.argmax(self.feedForward(x)),y) for (x,y) in test_data]
-        return sum(int(x==y) for (x,y) in test_results)
+       l=len(test_data)
+
+       per_output_sq_error=np.zeros((4,1))
+       for x,y in test_data:
+           prediction=self.feedForward(x)
+           error=prediction-y
+           per_output_sq_error+=error*error
+       per_output_mse=(per_output_sq_error/l).flatten()
+       the_list=per_output_mse.tolist()
+       total_mse=float(np.mean(per_output_mse))
+
+       print(
+           f"""
+                mse_total:{total_mse}
+                mse_per_output:[{the_list[0]:.3f},{the_list[1]:.3f},{the_list[2]:.3f},{the_list[3]:.3f}]
+                n:{l}
+
+
+           """
+
+
+
+       )
     
     def cost_derivative(self,output_activations,y):
         return (output_activations-y)
